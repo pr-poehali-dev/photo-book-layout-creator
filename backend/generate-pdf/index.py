@@ -82,49 +82,10 @@ def fetch_image(url: str):
         return None
 
 
-def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False, image_reader=None):
+def draw_crop_marks(c, pw, ph):
+    """Рисует метки обрезки по углам."""
     bleed = BLEED * mm
-    safe  = SAFE  * mm
-    text_x = safe + bleed
-    text_w = pw - 2 * (safe + bleed)
-
-    # Фон
-    c.setFillColor(colors.HexColor('#0c0a18'))
-    c.rect(0, 0, pw, ph, fill=1, stroke=0)
-
-    # Декор-полосы сверху
-    c.setFillColor(colors.HexColor('#F4622A'))
-    c.rect(0, ph - 6 * mm, pw, 6 * mm, fill=1, stroke=0)
-    c.setFillColor(colors.HexColor('#6C5CE7'))
-    c.rect(0, ph - 12 * mm, pw, 6 * mm, fill=1, stroke=0)
-
-    # Место под фото
-    photo_x = text_x
-    photo_y = ph * 0.35
-    photo_w = text_w
-    photo_h = ph * 0.43
-    c.setFillColor(colors.HexColor('#1a1730'))
-    c.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm, fill=1, stroke=0)
-
-    if image_reader:
-        # Вставляем реальное изображение с clip-маской через прямоугольник
-        c.saveState()
-        p = c.beginPath()
-        p.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm)
-        c.clipPath(p, stroke=0)
-        c.drawImage(image_reader, photo_x, photo_y, width=photo_w, height=photo_h,
-                    preserveAspectRatio=True, anchor='c')
-        c.restoreState()
-    else:
-        c.setLineWidth(0.6 * mm)
-        c.setStrokeColor(colors.HexColor('#ffffff25'))
-        cx = photo_x + photo_w / 2
-        cy = photo_y + photo_h / 2
-        c.roundRect(cx - 18 * mm, cy - 12 * mm, 36 * mm, 24 * mm, 3 * mm, fill=0, stroke=1)
-
-    # Метки обрезки
-    mark = 5 * mm
-    gap  = 2 * mm
+    mark, gap = 5 * mm, 2 * mm
     c.setStrokeColor(colors.HexColor('#888888'))
     c.setLineWidth(0.2 * mm)
     for x, y in [(bleed, bleed), (pw - bleed, bleed), (bleed, ph - bleed), (pw - bleed, ph - bleed)]:
@@ -132,29 +93,93 @@ def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False, ima
         sy = 1 if y == bleed else -1
         c.line(x + sx * gap, y, x + sx * (gap + mark), y)
         c.line(x, y + sy * gap, x, y + sy * (gap + mark))
-
-    # Линия безопасной зоны
     c.setStrokeColor(colors.HexColor('#ffffff10'))
     c.setLineWidth(0.2 * mm)
     c.rect(bleed, bleed, pw - 2 * bleed, ph - 2 * bleed, fill=0, stroke=1)
 
+
+def draw_photo_page(c, pw, ph, spread_num, image_reader=None):
+    """Левая страница разворота — только фото на весь разворот."""
+    bleed = BLEED * mm
+    safe  = SAFE  * mm
+
+    c.setFillColor(colors.HexColor('#0c0a18'))
+    c.rect(0, 0, pw, ph, fill=1, stroke=0)
+
+    # Фото на всю страницу (с отступом безопасной зоны)
+    px = bleed
+    py = bleed
+    pw2 = pw - 2 * bleed
+    ph2 = ph - 2 * bleed
+
+    if image_reader:
+        c.saveState()
+        p = c.beginPath()
+        p.rect(px, py, pw2, ph2)
+        c.clipPath(p, stroke=0)
+        c.drawImage(image_reader, px, py, width=pw2, height=ph2,
+                    preserveAspectRatio=True, anchor='c')
+        c.restoreState()
+        # Тёмный градиент снизу для текста
+        c.setFillColor(colors.HexColor('#0c0a18'))
+        c.rect(px, py, pw2, 18 * mm, fill=1, stroke=0)
+    else:
+        c.setFillColor(colors.HexColor('#1a1730'))
+        c.rect(px, py, pw2, ph2, fill=1, stroke=0)
+        c.setLineWidth(0.6 * mm)
+        c.setStrokeColor(colors.HexColor('#ffffff20'))
+        cx, cy = pw / 2, ph / 2
+        c.roundRect(cx - 20 * mm, cy - 15 * mm, 40 * mm, 30 * mm, 3 * mm, fill=0, stroke=1)
+
+    draw_crop_marks(c, pw, ph)
+
     # Номер разворота
-    side = 'П' if is_right else 'Л'
-    c.setFillColor(colors.HexColor('#ffffff35'))
+    c.setFillColor(colors.HexColor('#ffffff50'))
     c.setFont('DejaVu', 6)
-    c.drawString(text_x, safe + bleed, f'Разворот {spread_num} · {side}')
+    c.drawString(safe + bleed, safe + bleed, f'Разворот {spread_num} · Л')
+
+
+def draw_text_page(c, pw, ph, spread_num, heading, caption, text):
+    """Правая страница разворота — заголовок, текст, подпись."""
+    bleed = BLEED * mm
+    safe  = SAFE  * mm
+    tx = safe + bleed + 4 * mm
+    tw = pw - 2 * (safe + bleed) - 8 * mm
+
+    c.setFillColor(colors.HexColor('#0c0a18'))
+    c.rect(0, 0, pw, ph, fill=1, stroke=0)
+
+    # Акцентная полоса слева
+    c.setFillColor(colors.HexColor('#F4622A'))
+    c.rect(bleed, bleed, 3 * mm, ph - 2 * bleed, fill=1, stroke=0)
+
+    # Декор сверху
+    c.setFillColor(colors.HexColor('#6C5CE7'))
+    c.rect(0, ph - 8 * mm, pw, 8 * mm, fill=1, stroke=0)
+
+    draw_crop_marks(c, pw, ph)
 
     # Заголовок
-    _draw_wrapped(c, heading, text_x, photo_y - 8 * mm, text_w, 13, 'DejaVu-Bold',
-                  colors.white, align='center', page_w=pw)
+    _draw_wrapped(c, heading, tx, ph * 0.78, tw, 16, 'DejaVu-Bold',
+                  colors.white, page_w=pw)
+
+    # Разделитель
+    c.setStrokeColor(colors.HexColor('#F4622A'))
+    c.setLineWidth(0.5 * mm)
+    c.line(tx, ph * 0.72, tx + 20 * mm, ph * 0.72)
 
     # Основной текст
-    _draw_wrapped(c, text, text_x, photo_y - 24 * mm, text_w, 8.5, 'DejaVu',
-                  colors.HexColor('#ffffffbb'))
+    _draw_wrapped(c, text, tx, ph * 0.68, tw, 10, 'DejaVu',
+                  colors.HexColor('#ffffffcc'))
 
     # Подпись-капшн
-    _draw_wrapped(c, caption, text_x, safe + bleed + 14 * mm, text_w, 8, 'DejaVu-Oblique',
+    _draw_wrapped(c, caption, tx, safe + bleed + 18 * mm, tw, 9, 'DejaVu-Oblique',
                   colors.HexColor('#F4E070'))
+
+    # Номер разворота
+    c.setFillColor(colors.HexColor('#ffffff35'))
+    c.setFont('DejaVu', 6)
+    c.drawString(tx, safe + bleed, f'Разворот {spread_num} · П')
 
 
 def build_pdf(story: dict, fmt: str, image_urls: list = None) -> bytes:
@@ -211,9 +236,9 @@ def build_pdf(story: dict, fmt: str, image_urls: list = None) -> bytes:
         body    = spread.get('text', '')
         img     = readers[i]
 
-        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=False, image_reader=img)
+        draw_photo_page(c, pw, ph, i + 1, image_reader=img)
         c.showPage()
-        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=True, image_reader=img)
+        draw_text_page(c, pw, ph, i + 1, heading, caption, body)
         c.showPage()
 
     # Задняя обложка
