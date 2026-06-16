@@ -28,11 +28,11 @@ def handler(event: dict, context) -> dict:
         if not brief:
             return {'statusCode': 400, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'Опишите вашу историю'})}
 
-        api_key = os.environ.get('OPENAI_API_KEY', '')
+        api_key = os.environ.get('OPENROUTER_API_KEY', '')
         print(f'[DEBUG] api_key present: {bool(api_key)}, length: {len(api_key)}')
 
         if not api_key:
-            return {'statusCode': 500, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'OPENAI_API_KEY не настроен'})}
+            return {'statusCode': 500, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'OPENROUTER_API_KEY не настроен'})}
 
         system_prompt = (
             'Ты — редактор фотокниг. По техническому заданию клиента создаёшь макет книги. '
@@ -53,26 +53,28 @@ def handler(event: dict, context) -> dict:
             'response_format': {'type': 'json_object'},
         }).encode('utf-8')
 
-        print(f'[DEBUG] Sending request to OpenAI, payload size: {len(payload)}')
+        print(f'[DEBUG] Sending request to OpenRouter, payload size: {len(payload)}')
         ctx = ssl.create_default_context()
-        conn = http.client.HTTPSConnection('api.openai.com', timeout=55, context=ctx)
+        conn = http.client.HTTPSConnection('openrouter.ai', timeout=55, context=ctx)
         conn.request(
             'POST',
-            '/v1/chat/completions',
+            '/api/v1/chat/completions',
             body=payload,
             headers={
                 'Authorization': f'Bearer {api_key}',
                 'Content-Type': 'application/json',
                 'Content-Length': str(len(payload)),
+                'HTTP-Referer': 'https://poehali.dev',
+                'X-Title': 'Фотокнига',
             },
         )
         resp = conn.getresponse()
         resp_body = resp.read().decode('utf-8')
         conn.close()
-        print(f'[DEBUG] OpenAI response status: {resp.status}')
+        print(f'[DEBUG] OpenRouter response status: {resp.status}')
 
         if resp.status != 200:
-            print(f'[ERROR] OpenAI error body: {resp_body[:500]}')
+            print(f'[ERROR] OpenRouter error body: {resp_body[:500]}')
             return {
                 'statusCode': 502,
                 'headers': {**cors, 'Content-Type': 'application/json'},
