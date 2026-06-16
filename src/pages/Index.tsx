@@ -10,8 +10,9 @@ import {
 } from '@/components/ui/accordion';
 import { toast } from '@/hooks/use-toast';
 
-const STORY_URL = 'https://functions.poehali.dev/336d7e0c-c72a-414b-993e-e8d6082aaaea';
-const PDF_URL   = 'https://functions.poehali.dev/11d8f15e-6fad-41ea-ba16-2fa8cd94d364';
+const STORY_URL  = 'https://functions.poehali.dev/336d7e0c-c72a-414b-993e-e8d6082aaaea';
+const PDF_URL    = 'https://functions.poehali.dev/11d8f15e-6fad-41ea-ba16-2fa8cd94d364';
+const IMAGES_URL = 'https://functions.poehali.dev/9beafed0-1139-45e4-be53-83c8f41b48aa';
 
 interface Spread {
   heading: string;
@@ -67,8 +68,10 @@ export default function Index() {
   const [brief, setBrief] = useState('');
   const [format, setFormat] = useState('20x20');
   const [loading, setLoading] = useState(false);
+  const [imagesLoading, setImagesLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [story, setStory] = useState<Story | null>(null);
+  const [imageUrls, setImageUrls] = useState<(string | null)[]>([]);
 
   const generate = async () => {
     if (!brief.trim()) {
@@ -77,6 +80,7 @@ export default function Index() {
     }
     setLoading(true);
     setStory(null);
+    setImageUrls([]);
     try {
       const res = await fetch(STORY_URL, {
         method: 'POST',
@@ -89,8 +93,27 @@ export default function Index() {
         return;
       }
       setStory(data);
-      toast({ title: 'Макет готов!', description: 'История и развороты собраны ниже.' });
+      toast({ title: 'История готова!', description: 'Генерируем иллюстрации для разворотов…' });
       setTimeout(() => document.getElementById('layout')?.scrollIntoView({ behavior: 'smooth' }), 100);
+
+      // Запускаем генерацию изображений параллельно
+      const bookId = `book_${Date.now()}`;
+      setImagesLoading(true);
+      fetch(IMAGES_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ spreads: data.spreads, title: data.title, book_id: bookId }),
+      })
+        .then(r => r.json())
+        .then(imgData => {
+          if (imgData.image_urls) {
+            setImageUrls(imgData.image_urls);
+            toast({ title: 'Иллюстрации готовы!', description: 'Все изображения сгенерированы и добавлены в макет.' });
+          }
+        })
+        .catch(() => toast({ title: 'Изображения не загрузились', description: 'Макет будет без иллюстраций.' }))
+        .finally(() => setImagesLoading(false));
+
     } catch {
       toast({ title: 'Ошибка сети', description: 'Проверьте подключение и попробуйте снова.' });
     } finally {
@@ -105,7 +128,7 @@ export default function Index() {
       const res = await fetch(PDF_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ story, format }),
+        body: JSON.stringify({ story, format, image_urls: imageUrls }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -289,29 +312,46 @@ export default function Index() {
             <span className="text-xs uppercase tracking-widest text-lemon font-display">Ваш макет</span>
             <h2 className="font-display font-bold text-4xl mt-3 mb-4">{story.title}</h2>
             <p className="text-white/60 italic">{story.intro}</p>
+            {imagesLoading && (
+              <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm text-white/60">
+                <Icon name="Loader2" size={14} className="animate-spin text-lemon" />
+                Генерируем иллюстрации для разворотов…
+              </div>
+            )}
           </div>
           <div className="space-y-6">
-            {story.spreads.map((sp, i) => (
-              <div
-                key={i}
-                className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-7 grid md:grid-cols-2 gap-6 items-center"
-              >
-                <div className={`grid grid-cols-2 gap-3 ${i % 2 ? 'md:order-2' : ''}`}>
-                  <div className="aspect-[4/5] rounded-xl bg-gradient-to-br from-coral/40 to-indigo/40 flex items-center justify-center text-white/30">
-                    <Icon name="ImagePlus" size={28} />
+            {story.spreads.map((sp, i) => {
+              const imgUrl = imageUrls[i] ?? null;
+              return (
+                <div
+                  key={i}
+                  className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-7 grid md:grid-cols-2 gap-6 items-center"
+                >
+                  <div className={`${i % 2 ? 'md:order-2' : ''}`}>
+                    {imgUrl ? (
+                      <img
+                        src={imgUrl}
+                        alt={sp.heading}
+                        className="w-full rounded-2xl object-cover aspect-[4/3] shadow-lg border border-white/10"
+                      />
+                    ) : (
+                      <div className="aspect-[4/3] rounded-2xl bg-gradient-to-br from-coral/30 to-indigo/30 flex items-center justify-center text-white/30 border border-white/10">
+                        {imagesLoading
+                          ? <Icon name="Loader2" size={32} className="animate-spin text-white/40" />
+                          : <Icon name="ImagePlus" size={32} />
+                        }
+                      </div>
+                    )}
                   </div>
-                  <div className="aspect-[4/5] rounded-xl bg-gradient-to-br from-indigo/40 to-lemon/30 flex items-center justify-center text-white/30">
-                    <Icon name="ImagePlus" size={28} />
+                  <div>
+                    <span className="text-xs text-white/40 font-display">Разворот {i + 1}</span>
+                    <h3 className="font-display font-semibold text-2xl mt-1 mb-3">{sp.heading}</h3>
+                    <p className="text-white/70 leading-relaxed mb-3">{sp.text}</p>
+                    <p className="text-sm text-lemon/90 italic">{sp.caption}</p>
                   </div>
                 </div>
-                <div>
-                  <span className="text-xs text-white/40 font-display">Разворот {i + 1}</span>
-                  <h3 className="font-display font-semibold text-2xl mt-1 mb-3">{sp.heading}</h3>
-                  <p className="text-white/70 leading-relaxed mb-3">{sp.text}</p>
-                  <p className="text-sm text-lemon/90 italic">{sp.caption}</p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="mt-10 flex flex-wrap justify-center gap-4">
             <Button

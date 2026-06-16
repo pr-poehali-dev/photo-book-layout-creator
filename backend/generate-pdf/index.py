@@ -9,6 +9,7 @@ from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
 
 FORMATS = {
     '20x20': (200, 200),
@@ -71,7 +72,17 @@ def _draw_wrapped(c, text, x, y, max_w, font_size, font, color, align='left', pa
             break
 
 
-def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False):
+def fetch_image(url: str):
+    """Скачивает изображение по URL и возвращает ImageReader или None."""
+    try:
+        with urllib.request.urlopen(url, timeout=20) as r:
+            return ImageReader(io.BytesIO(r.read()))
+    except Exception as e:
+        print(f'[WARN] Could not fetch image {url}: {e}')
+        return None
+
+
+def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False, image_reader=None):
     bleed = BLEED * mm
     safe  = SAFE  * mm
     text_x = safe + bleed
@@ -94,11 +105,22 @@ def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False):
     photo_h = ph * 0.43
     c.setFillColor(colors.HexColor('#1a1730'))
     c.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm, fill=1, stroke=0)
-    c.setLineWidth(0.6 * mm)
-    c.setStrokeColor(colors.HexColor('#ffffff25'))
-    cx = photo_x + photo_w / 2
-    cy = photo_y + photo_h / 2
-    c.roundRect(cx - 18 * mm, cy - 12 * mm, 36 * mm, 24 * mm, 3 * mm, fill=0, stroke=1)
+
+    if image_reader:
+        # Вставляем реальное изображение с clip-маской через прямоугольник
+        c.saveState()
+        p = c.beginPath()
+        p.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm)
+        c.clipPath(p, stroke=0)
+        c.drawImage(image_reader, photo_x, photo_y, width=photo_w, height=photo_h,
+                    preserveAspectRatio=True, anchor='c')
+        c.restoreState()
+    else:
+        c.setLineWidth(0.6 * mm)
+        c.setStrokeColor(colors.HexColor('#ffffff25'))
+        cx = photo_x + photo_w / 2
+        cy = photo_y + photo_h / 2
+        c.roundRect(cx - 18 * mm, cy - 12 * mm, 36 * mm, 24 * mm, 3 * mm, fill=0, stroke=1)
 
     # Метки обрезки
     mark = 5 * mm
@@ -135,7 +157,7 @@ def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False):
                   colors.HexColor('#F4E070'))
 
 
-def build_pdf(story: dict, fmt: str) -> bytes:
+def build_pdf(story: dict, fmt: str, image_urls: list = None) -> bytes:
     load_fonts()
 
     page_w_mm, page_h_mm = FORMATS.get(fmt, FORMATS['20x20'])
@@ -176,15 +198,22 @@ def build_pdf(story: dict, fmt: str) -> bytes:
     c.drawString(text_x, safe + bleed, note)
     c.showPage()
 
+    # Предзагружаем картинки
+    readers = []
+    for i in range(len(spreads)):
+        url = (image_urls or [])[i] if image_urls and i < len(image_urls) else None
+        readers.append(fetch_image(url) if url else None)
+
     # Развороты
     for i, spread in enumerate(spreads):
         heading = spread.get('heading', '')
         caption = spread.get('caption', '')
         body    = spread.get('text', '')
+        img     = readers[i]
 
-        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=False)
+        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=False, image_reader=img)
         c.showPage()
-        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=True)
+        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=True, image_reader=img)
         c.showPage()
 
     # Задняя обложка
@@ -230,7 +259,8 @@ def handler(event: dict, context) -> dict:
             return {'statusCode': 400, 'headers': {**cors, 'Content-Type': 'application/json'},
                     'body': json.dumps({'error': 'Передайте объект story'})}
 
-        pdf_bytes = build_pdf(story, fmt)
+        image_urls = body.get('image_urls', [])
+        pdf_bytes = build_pdf(story, fmt, image_urls)
         pdf_b64   = base64.b64encode(pdf_bytes).decode('utf-8')
 
         return {
