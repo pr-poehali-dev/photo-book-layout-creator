@@ -32,7 +32,11 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
 
-    --radius: 0.5rem;
+    --radius: 1rem;
+
+    --coral: 14 92% 58%;
+    --indigo: 248 70% 60%;
+    --lemon: 48 100% 60%;
 
     --sidebar-background: 0 0% 98%;
 
@@ -96,6 +100,27 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(
+      110deg,
+      hsl(var(--coral)),
+      hsl(var(--lemon)) 45%,
+      hsl(var(--indigo))
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .grain {
+    background-image: radial-gradient(
+      hsl(0 0% 100% / 0.04) 1px,
+      transparent 1px
+    );
+    background-size: 4px 4px;
   }
 }
