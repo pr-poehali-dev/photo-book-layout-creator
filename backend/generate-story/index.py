@@ -1,14 +1,11 @@
 import json
 import os
-import urllib.request
-# redeploy trigger: secret updated
-import urllib.error
+import http.client
+import ssl
 
 
 def handler(event: dict, context) -> dict:
     '''Генерирует историю и тексты для разворотов фотокниги по описанию клиента (ТЗ) через OpenAI.'''
-    method = event.get('httpMethod', 'GET')
-
     cors = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -16,35 +13,22 @@ def handler(event: dict, context) -> dict:
         'Access-Control-Max-Age': '86400',
     }
 
-    if method == 'OPTIONS':
+    if event.get('httpMethod') == 'OPTIONS':
         return {'statusCode': 200, 'headers': cors, 'body': ''}
 
-    if method != 'POST':
-        return {
-            'statusCode': 405,
-            'headers': {**cors, 'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Method not allowed'}),
-        }
+    if event.get('httpMethod') != 'POST':
+        return {'statusCode': 405, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'Method not allowed'})}
 
     body = json.loads(event.get('body') or '{}')
     brief = (body.get('brief') or '').strip()
-    spreads = int(body.get('spreads') or 5)
-    spreads = max(1, min(spreads, 12))
+    spreads = max(1, min(int(body.get('spreads') or 5), 12))
 
     if not brief:
-        return {
-            'statusCode': 400,
-            'headers': {**cors, 'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'Опишите вашу историю'}),
-        }
+        return {'statusCode': 400, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'Опишите вашу историю'})}
 
-    api_key = os.environ.get('OPENAI_API_KEY')
+    api_key = os.environ.get('OPENAI_API_KEY', '')
     if not api_key:
-        return {
-            'statusCode': 500,
-            'headers': {**cors, 'Content-Type': 'application/json'},
-            'body': json.dumps({'error': 'OPENAI_API_KEY не настроен'}),
-        }
+        return {'statusCode': 500, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'OPENAI_API_KEY не настроен'})}
 
     system_prompt = (
         'Ты — редактор фотокниг. По техническому заданию клиента создаёшь макет книги. '
@@ -55,7 +39,7 @@ def handler(event: dict, context) -> dict:
         f'Сделай ровно {spreads} разворотов. Пиши на русском, тепло и душевно.'
     )
 
-    payload = {
+    payload = json.dumps({
         'model': 'gpt-4o-mini',
         'messages': [
             {'role': 'system', 'content': system_prompt},
@@ -63,28 +47,32 @@ def handler(event: dict, context) -> dict:
         ],
         'temperature': 0.8,
         'response_format': {'type': 'json_object'},
-    }
+    }).encode('utf-8')
 
-    req = urllib.request.Request(
-        'https://api.openai.com/v1/chat/completions',
-        data=json.dumps(payload).encode('utf-8'),
+    ctx = ssl.create_default_context()
+    conn = http.client.HTTPSConnection('api.openai.com', timeout=55, context=ctx)
+    conn.request(
+        'POST',
+        '/v1/chat/completions',
+        body=payload,
         headers={
             'Authorization': f'Bearer {api_key}',
             'Content-Type': 'application/json',
+            'Content-Length': str(len(payload)),
         },
-        method='POST',
     )
+    resp = conn.getresponse()
+    resp_body = resp.read().decode('utf-8')
+    conn.close()
 
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
+    if resp.status != 200:
         return {
             'statusCode': 502,
             'headers': {**cors, 'Content-Type': 'application/json'},
-            'body': json.dumps({'error': f'Ошибка OpenAI: {e.code}'}),
+            'body': json.dumps({'error': f'Ошибка OpenAI {resp.status}: {resp_body[:300]}'}),
         }
 
+    data = json.loads(resp_body)
     content = data['choices'][0]['message']['content']
     story = json.loads(content)
 
