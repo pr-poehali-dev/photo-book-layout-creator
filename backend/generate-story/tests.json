@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "CORS preflight",
+      "method": "OPTIONS",
+      "path": "/",
+      "expectedStatus": 200
+    },
+    {
+      "name": "Empty brief returns 400",
+      "method": "POST",
+      "path": "/",
+      "body": {"brief": ""},
+      "expectedStatus": 400
+    }
+  ]
+}

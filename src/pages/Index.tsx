@@ -8,6 +8,20 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '@/components/ui/accordion';
+import { toast } from '@/hooks/use-toast';
+
+const STORY_URL = 'https://functions.poehali.dev/336d7e0c-c72a-414b-993e-e8d6082aaaea';
+
+interface Spread {
+  heading: string;
+  caption: string;
+  text: string;
+}
+interface Story {
+  title: string;
+  intro: string;
+  spreads: Spread[];
+}
 
 const BOOK_IMG =
   'https://cdn.poehali.dev/projects/aef6b5b8-e134-4cbc-96a5-cff028092b85/files/5097f0cb-3b34-401f-a99f-5480f63439ed.jpg';
@@ -50,6 +64,36 @@ const galleryItems = [
 
 export default function Index() {
   const [brief, setBrief] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [story, setStory] = useState<Story | null>(null);
+
+  const generate = async () => {
+    if (!brief.trim()) {
+      toast({ title: 'Опишите вашу историю', description: 'Расскажите, о чём будет книга.' });
+      return;
+    }
+    setLoading(true);
+    setStory(null);
+    try {
+      const res = await fetch(STORY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief, spreads: 5 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: 'Не удалось сгенерировать', description: data.error || 'Попробуйте позже.' });
+        return;
+      }
+      setStory(data);
+      toast({ title: 'Макет готов!', description: 'История и развороты собраны ниже.' });
+      setTimeout(() => document.getElementById('layout')?.scrollIntoView({ behavior: 'smooth' }), 100);
+    } catch {
+      toast({ title: 'Ошибка сети', description: 'Проверьте подключение и попробуйте снова.' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#0c0a18] text-white font-sans overflow-x-hidden grain">
@@ -154,8 +198,16 @@ export default function Index() {
               placeholder="Например: книга о нашем путешествии в Грузию, тёплая и душевная, с акцентом на горы и еду…"
               className="min-h-32 rounded-2xl bg-[#0c0a18]/60 border-white/15 text-white placeholder:text-white/30 resize-none"
             />
-            <Button className="mt-5 rounded-full bg-lemon hover:bg-lemon/90 text-[#0c0a18] font-semibold px-7">
-              <Icon name="Wand2" size={18} className="mr-2" /> Сгенерировать историю
+            <Button
+              onClick={generate}
+              disabled={loading}
+              className="mt-5 rounded-full bg-lemon hover:bg-lemon/90 text-[#0c0a18] font-semibold px-7 disabled:opacity-60"
+            >
+              {loading ? (
+                <><Icon name="Loader2" size={18} className="mr-2 animate-spin" /> Генерируем…</>
+              ) : (
+                <><Icon name="Wand2" size={18} className="mr-2" /> Сгенерировать историю</>
+              )}
             </Button>
           </div>
           <div className="relative">
@@ -164,19 +216,61 @@ export default function Index() {
                 <span className="w-3 h-3 rounded-full bg-coral" />
                 <span className="w-3 h-3 rounded-full bg-lemon" />
                 <span className="w-3 h-3 rounded-full bg-indigo" />
-                <span className="ml-2">Разворот · стр. 4–5</span>
+                <span className="ml-2">{story ? story.title : 'Разворот · стр. 4–5'}</span>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="aspect-square rounded-xl bg-gradient-to-br from-coral/40 to-indigo/40" />
                 <div className="aspect-square rounded-xl bg-gradient-to-br from-indigo/40 to-lemon/30" />
               </div>
               <p className="text-sm text-white/70 leading-relaxed italic">
-                «Дорога вилась вверх, и облака лежали у ног. Здесь, среди гор, время текло иначе…»
+                «{story?.spreads?.[0]?.text || 'Дорога вилась вверх, и облака лежали у ног. Здесь, среди гор, время текло иначе…'}»
               </p>
             </div>
           </div>
         </div>
       </section>
+
+      {/* GENERATED LAYOUT */}
+      {story && (
+        <section id="layout" className="relative z-10 container py-12 animate-fade-in">
+          <div className="text-center max-w-2xl mx-auto mb-12">
+            <span className="text-xs uppercase tracking-widest text-lemon font-display">Ваш макет</span>
+            <h2 className="font-display font-bold text-4xl mt-3 mb-4">{story.title}</h2>
+            <p className="text-white/60 italic">{story.intro}</p>
+          </div>
+          <div className="space-y-6">
+            {story.spreads.map((sp, i) => (
+              <div
+                key={i}
+                className="rounded-3xl border border-white/10 bg-white/[0.03] p-5 md:p-7 grid md:grid-cols-2 gap-6 items-center"
+              >
+                <div className={`grid grid-cols-2 gap-3 ${i % 2 ? 'md:order-2' : ''}`}>
+                  <div className="aspect-[4/5] rounded-xl bg-gradient-to-br from-coral/40 to-indigo/40 flex items-center justify-center text-white/30">
+                    <Icon name="ImagePlus" size={28} />
+                  </div>
+                  <div className="aspect-[4/5] rounded-xl bg-gradient-to-br from-indigo/40 to-lemon/30 flex items-center justify-center text-white/30">
+                    <Icon name="ImagePlus" size={28} />
+                  </div>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40 font-display">Разворот {i + 1}</span>
+                  <h3 className="font-display font-semibold text-2xl mt-1 mb-3">{sp.heading}</h3>
+                  <p className="text-white/70 leading-relaxed mb-3">{sp.text}</p>
+                  <p className="text-sm text-lemon/90 italic">{sp.caption}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-10 flex flex-wrap justify-center gap-4">
+            <Button size="lg" className="rounded-full bg-coral hover:bg-coral/90 text-white font-semibold px-8">
+              <Icon name="FileDown" size={18} className="mr-2" /> Собрать PDF-макет
+            </Button>
+            <Button size="lg" variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 px-8" onClick={generate} disabled={loading}>
+              <Icon name="RefreshCw" size={16} className="mr-2" /> Перегенерировать
+            </Button>
+          </div>
+        </section>
+      )}
 
       {/* TEMPLATES */}
       <section id="templates" className="relative z-10 container py-20">
