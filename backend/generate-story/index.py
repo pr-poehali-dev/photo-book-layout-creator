@@ -2,7 +2,7 @@ import json
 import os
 import http.client
 import ssl
-import traceback
+import traceback  # v2
 
 
 def handler(event: dict, context) -> dict:
