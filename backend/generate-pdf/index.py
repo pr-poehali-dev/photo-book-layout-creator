@@ -2,16 +2,14 @@ import json
 import base64
 import io
 import os
-from reportlab.lib.pagesizes import A4
+import urllib.request
+import tempfile
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.lib.utils import ImageReader
 
-
-# Размеры форматов фотокниг (ширина × высота в мм), разворот = 2 страницы рядом
 FORMATS = {
     '20x20': (200, 200),
     '30x20': (300, 200),
@@ -19,88 +17,36 @@ FORMATS = {
     '30x30': (300, 300),
 }
 
-# Поля для типографии (мм)
-BLEED = 3      # вылет за обрез
-SAFE  = 5      # безопасная зона от обреза
-SPINE = 10     # корешок посередине разворота
+BLEED = 3
+SAFE  = 5
+
+FONT_URLS = {
+    'DejaVu':       'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
+    'DejaVu-Bold':  'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Bold.ttf',
+    'DejaVu-Oblique': 'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans-Oblique.ttf',
+}
+
+_fonts_loaded = False
+
+def load_fonts():
+    global _fonts_loaded
+    if _fonts_loaded:
+        return
+    tmp = tempfile.gettempdir()
+    for name, url in FONT_URLS.items():
+        path = os.path.join(tmp, f'{name}.ttf')
+        if not os.path.exists(path):
+            urllib.request.urlretrieve(url, path)
+        pdfmetrics.registerFont(TTFont(name, path))
+    _fonts_loaded = True
 
 
-def draw_page(c: canvas.Canvas, w: float, h: float, spread_num: int,
-              heading: str, caption: str, text: str,
-              is_right: bool = False) -> None:
-    """Рисует одну страницу разворота."""
-    bleed = BLEED * mm
-    safe  = SAFE  * mm
-
-    # Фон страницы
-    c.setFillColor(colors.HexColor('#0c0a18'))
-    c.rect(0, 0, w, h, fill=1, stroke=0)
-
-    # Декоративный градиент-полоса сверху
-    c.setFillColor(colors.HexColor('#F4622A'))
-    c.rect(0, h - 6 * mm, w, 6 * mm, fill=1, stroke=0)
-    c.setFillColor(colors.HexColor('#6C5CE7'))
-    c.rect(0, h - 12 * mm, w, 6 * mm, fill=1, stroke=0)
-
-    # Рамка места под фото
-    photo_x = safe + bleed
-    photo_y = h * 0.35
-    photo_w = w - 2 * (safe + bleed)
-    photo_h = h * 0.45
-    c.setFillColor(colors.HexColor('#1a1730'))
-    c.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm, fill=1, stroke=0)
-
-    # Иконка «место для фото»
-    c.setFillColor(colors.HexColor('#ffffff20'))
-    cx = photo_x + photo_w / 2
-    cy = photo_y + photo_h / 2
-    c.setLineWidth(0.8 * mm)
-    c.setStrokeColor(colors.HexColor('#ffffff30'))
-    c.roundRect(cx - 18 * mm, cy - 12 * mm, 36 * mm, 24 * mm, 3 * mm, fill=0, stroke=1)
-
-    # Метки обрезки (crop marks) — 4 угла
-    mark = 5 * mm
-    gap  = 2 * mm
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(0.25 * mm)
-    for x, y in [(bleed, bleed), (w - bleed, bleed), (bleed, h - bleed), (w - bleed, h - bleed)]:
-        sx = 1 if x == bleed else -1
-        sy = 1 if y == bleed else -1
-        c.line(x + sx * gap, y, x + sx * (gap + mark), y)
-        c.line(x, y + sy * gap, x, y + sy * (gap + mark))
-
-    # Номер разворота
-    c.setFillColor(colors.HexColor('#ffffff40'))
-    c.setFont('Helvetica', 7)
-    side = 'R' if is_right else 'L'
-    c.drawString(safe + bleed, safe + bleed, f'Разворот {spread_num} • {side}')
-
-    # Заголовок
-    c.setFillColor(colors.white)
-    c.setFont('Helvetica-Bold', 14)
-    text_x = safe + bleed
-    text_w = w - 2 * (safe + bleed)
-    _draw_wrapped(c, heading, text_x, photo_y - 10 * mm, text_w, 14, 'Helvetica-Bold', colors.white, align='center', w=w)
-
-    # Основной текст
-    _draw_wrapped(c, text, text_x, photo_y - 28 * mm, text_w, 9, 'Helvetica', colors.HexColor('#ffffffcc'))
-
-    # Подпись-капшн
-    _draw_wrapped(c, caption, text_x, safe + bleed + 8 * mm, text_w, 8, 'Helvetica-Oblique', colors.HexColor('#F4E070'))
-
-    # Линия вылета
-    c.setStrokeColor(colors.HexColor('#ffffff15'))
-    c.setLineWidth(0.3 * mm)
-    c.rect(bleed, bleed, w - 2 * bleed, h - 2 * bleed, fill=0, stroke=1)
-
-
-def _draw_wrapped(c, text, x, y, max_w, font_size, font, color, align='left', w=None):
-    """Рисует текст с переносом строк."""
+def _draw_wrapped(c, text, x, y, max_w, font_size, font, color, align='left', page_w=None):
     c.setFont(font, font_size)
     c.setFillColor(color)
-    words = text.split()
+    words = str(text).split()
     line = ''
-    line_h = font_size * 1.4
+    line_h = font_size * 1.5
     cur_y = y
     lines = []
     for word in words:
@@ -113,30 +59,97 @@ def _draw_wrapped(c, text, x, y, max_w, font_size, font, color, align='left', w=
             line = word
     if line:
         lines.append(line)
-    for l in lines:
-        lw = c.stringWidth(l, font, font_size)
-        if align == 'center' and w:
+    for ln in lines:
+        lw = c.stringWidth(ln, font, font_size)
+        if align == 'center' and page_w:
             draw_x = x + (max_w - lw) / 2
         else:
             draw_x = x
-        c.drawString(draw_x, cur_y, l)
+        c.drawString(draw_x, cur_y, ln)
         cur_y -= line_h
-        if cur_y < 0:
+        if cur_y < SAFE * mm:
             break
 
 
+def draw_page(c, pw, ph, spread_num, heading, caption, text, is_right=False):
+    bleed = BLEED * mm
+    safe  = SAFE  * mm
+    text_x = safe + bleed
+    text_w = pw - 2 * (safe + bleed)
+
+    # Фон
+    c.setFillColor(colors.HexColor('#0c0a18'))
+    c.rect(0, 0, pw, ph, fill=1, stroke=0)
+
+    # Декор-полосы сверху
+    c.setFillColor(colors.HexColor('#F4622A'))
+    c.rect(0, ph - 6 * mm, pw, 6 * mm, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor('#6C5CE7'))
+    c.rect(0, ph - 12 * mm, pw, 6 * mm, fill=1, stroke=0)
+
+    # Место под фото
+    photo_x = text_x
+    photo_y = ph * 0.35
+    photo_w = text_w
+    photo_h = ph * 0.43
+    c.setFillColor(colors.HexColor('#1a1730'))
+    c.roundRect(photo_x, photo_y, photo_w, photo_h, 8 * mm, fill=1, stroke=0)
+    c.setLineWidth(0.6 * mm)
+    c.setStrokeColor(colors.HexColor('#ffffff25'))
+    cx = photo_x + photo_w / 2
+    cy = photo_y + photo_h / 2
+    c.roundRect(cx - 18 * mm, cy - 12 * mm, 36 * mm, 24 * mm, 3 * mm, fill=0, stroke=1)
+
+    # Метки обрезки
+    mark = 5 * mm
+    gap  = 2 * mm
+    c.setStrokeColor(colors.HexColor('#888888'))
+    c.setLineWidth(0.2 * mm)
+    for x, y in [(bleed, bleed), (pw - bleed, bleed), (bleed, ph - bleed), (pw - bleed, ph - bleed)]:
+        sx = 1 if x == bleed else -1
+        sy = 1 if y == bleed else -1
+        c.line(x + sx * gap, y, x + sx * (gap + mark), y)
+        c.line(x, y + sy * gap, x, y + sy * (gap + mark))
+
+    # Линия безопасной зоны
+    c.setStrokeColor(colors.HexColor('#ffffff10'))
+    c.setLineWidth(0.2 * mm)
+    c.rect(bleed, bleed, pw - 2 * bleed, ph - 2 * bleed, fill=0, stroke=1)
+
+    # Номер разворота
+    side = 'П' if is_right else 'Л'
+    c.setFillColor(colors.HexColor('#ffffff35'))
+    c.setFont('DejaVu', 6)
+    c.drawString(text_x, safe + bleed, f'Разворот {spread_num} · {side}')
+
+    # Заголовок
+    _draw_wrapped(c, heading, text_x, photo_y - 8 * mm, text_w, 13, 'DejaVu-Bold',
+                  colors.white, align='center', page_w=pw)
+
+    # Основной текст
+    _draw_wrapped(c, text, text_x, photo_y - 24 * mm, text_w, 8.5, 'DejaVu',
+                  colors.HexColor('#ffffffbb'))
+
+    # Подпись-капшн
+    _draw_wrapped(c, caption, text_x, safe + bleed + 14 * mm, text_w, 8, 'DejaVu-Oblique',
+                  colors.HexColor('#F4E070'))
+
+
 def build_pdf(story: dict, fmt: str) -> bytes:
-    """Строит PDF-разворот для типографии и возвращает байты."""
+    load_fonts()
+
     page_w_mm, page_h_mm = FORMATS.get(fmt, FORMATS['20x20'])
-    bleed = BLEED
-    # Размер страницы с вылетом
-    pw = (page_w_mm + 2 * bleed) * mm
-    ph = (page_h_mm + 2 * bleed) * mm
+    pw = (page_w_mm + 2 * BLEED) * mm
+    ph = (page_h_mm + 2 * BLEED) * mm
+    bleed = BLEED * mm
+    safe  = SAFE  * mm
+    text_x = safe + bleed
+    text_w = pw - 2 * (safe + bleed)
 
     buf = io.BytesIO()
     c = canvas.Canvas(buf, pagesize=(pw, ph))
-    c.setTitle(story.get('title', 'Фотокнига'))
-    c.setAuthor('Фотокнига')
+    title = story.get('title', 'Фотокнига')
+    c.setTitle(title)
 
     spreads = story.get('spreads', [])
 
@@ -147,32 +160,31 @@ def build_pdf(story: dict, fmt: str) -> bytes:
     c.rect(0, ph - 8 * mm, pw, 8 * mm, fill=1, stroke=0)
     c.setFillColor(colors.HexColor('#6C5CE7'))
     c.rect(0, ph - 16 * mm, pw, 8 * mm, fill=1, stroke=0)
+
     c.setFillColor(colors.white)
-    c.setFont('Helvetica-Bold', 22)
-    title = story.get('title', 'Фотокнига')
-    tw = c.stringWidth(title, 'Helvetica-Bold', 22)
-    c.drawString((pw - tw) / 2, ph / 2 + 10 * mm, title)
+    c.setFont('DejaVu-Bold', 20)
+    tw = c.stringWidth(title, 'DejaVu-Bold', 20)
+    c.drawString((pw - tw) / 2, ph / 2 + 12 * mm, title)
+
     intro = story.get('intro', '')
-    c.setFont('Helvetica', 10)
-    c.setFillColor(colors.HexColor('#ffffffcc'))
-    _draw_wrapped(c, intro, 15 * mm, ph / 2 - 8 * mm, pw - 30 * mm, 10, 'Helvetica', colors.HexColor('#ffffffcc'))
-    c.setFont('Helvetica', 8)
-    c.setFillColor(colors.HexColor('#ffffff50'))
-    c.drawString(15 * mm, 15 * mm, 'С полями 3мм для вылета и 5мм безопасная зона')
+    _draw_wrapped(c, intro, text_x, ph / 2 - 4 * mm, text_w, 9, 'DejaVu',
+                  colors.HexColor('#ffffffcc'))
+
+    c.setFont('DejaVu', 7)
+    c.setFillColor(colors.HexColor('#ffffff40'))
+    note = f'Формат {fmt.replace("x", "×")} см · Вылет {BLEED}мм · Безопасная зона {SAFE}мм'
+    c.drawString(text_x, safe + bleed, note)
     c.showPage()
 
     # Развороты
     for i, spread in enumerate(spreads):
         heading = spread.get('heading', '')
         caption = spread.get('caption', '')
-        text    = spread.get('text', '')
+        body    = spread.get('text', '')
 
-        # Левая страница
-        draw_page(c, pw, ph, i + 1, heading, caption, text, is_right=False)
+        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=False)
         c.showPage()
-
-        # Правая страница
-        draw_page(c, pw, ph, i + 1, caption, heading, text, is_right=True)
+        draw_page(c, pw, ph, i + 1, heading, caption, body, is_right=True)
         c.showPage()
 
     # Задняя обложка
@@ -182,10 +194,10 @@ def build_pdf(story: dict, fmt: str) -> bytes:
     c.rect(0, 0, pw, 8 * mm, fill=1, stroke=0)
     c.setFillColor(colors.HexColor('#F4622A'))
     c.rect(0, 8 * mm, pw, 8 * mm, fill=1, stroke=0)
-    c.setFont('Helvetica', 9)
-    c.setFillColor(colors.HexColor('#ffffff60'))
-    tagline = 'Создано с любовью · фотокнига.рф'
-    tw = c.stringWidth(tagline, 'Helvetica', 9)
+    c.setFont('DejaVu', 9)
+    c.setFillColor(colors.HexColor('#ffffff50'))
+    tagline = 'Создано с любовью'
+    tw = c.stringWidth(tagline, 'DejaVu', 9)
     c.drawString((pw - tw) / 2, ph / 2, tagline)
     c.showPage()
 
@@ -194,7 +206,7 @@ def build_pdf(story: dict, fmt: str) -> bytes:
 
 
 def handler(event: dict, context) -> dict:
-    '''Собирает PDF-макет фотокниги с полями, обрезкой и разворотами для отправки в типографию.'''
+    '''Собирает PDF-макет фотокниги с кириллицей, полями, обрезкой и разворотами для типографии.'''
     cors = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -206,26 +218,33 @@ def handler(event: dict, context) -> dict:
         return {'statusCode': 200, 'headers': cors, 'body': ''}
 
     if event.get('httpMethod') != 'POST':
-        return {'statusCode': 405, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'Method not allowed'})}
+        return {'statusCode': 405, 'headers': {**cors, 'Content-Type': 'application/json'},
+                'body': json.dumps({'error': 'Method not allowed'})}
 
-    body = json.loads(event.get('body') or '{}')
-    story = body.get('story')
-    fmt   = body.get('format', '20x20')
+    try:
+        body  = json.loads(event.get('body') or '{}')
+        story = body.get('story')
+        fmt   = body.get('format', '20x20')
 
-    if not story or not story.get('spreads'):
-        return {'statusCode': 400, 'headers': {**cors, 'Content-Type': 'application/json'}, 'body': json.dumps({'error': 'Передайте объект story'})}
+        if not story or not story.get('spreads'):
+            return {'statusCode': 400, 'headers': {**cors, 'Content-Type': 'application/json'},
+                    'body': json.dumps({'error': 'Передайте объект story'})}
 
-    pdf_bytes = build_pdf(story, fmt)
-    pdf_b64   = base64.b64encode(pdf_bytes).decode('utf-8')
+        pdf_bytes = build_pdf(story, fmt)
+        pdf_b64   = base64.b64encode(pdf_bytes).decode('utf-8')
 
-    return {
-        'statusCode': 200,
-        'headers': {
-            **cors,
-            'Content-Type': 'application/pdf',
-            'Content-Disposition': f'attachment; filename="photobook_{fmt}.pdf"',
-            'X-Base64': 'true',
-        },
-        'body': pdf_b64,
-        'isBase64Encoded': True,
-    }
+        return {
+            'statusCode': 200,
+            'headers': {
+                **cors,
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': f'attachment; filename="photobook_{fmt}.pdf"',
+            },
+            'body': pdf_b64,
+            'isBase64Encoded': True,
+        }
+    except Exception as e:
+        import traceback
+        print(f'[ERROR] {e}\n{traceback.format_exc()}')
+        return {'statusCode': 500, 'headers': {**cors, 'Content-Type': 'application/json'},
+                'body': json.dumps({'error': str(e)})}
