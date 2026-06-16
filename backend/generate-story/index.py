@@ -65,7 +65,7 @@ def handler(event: dict, context) -> dict:
                 'Content-Type': 'application/json',
                 'Content-Length': str(len(payload)),
                 'HTTP-Referer': 'https://poehali.dev',
-                'X-Title': 'Фотокнига',
+                'X-Title': 'Photobook',
             },
         )
         resp = conn.getresponse()
