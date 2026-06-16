@@ -11,6 +11,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 
 const STORY_URL = 'https://functions.poehali.dev/336d7e0c-c72a-414b-993e-e8d6082aaaea';
+const PDF_URL   = 'https://functions.poehali.dev/11d8f15e-6fad-41ea-ba16-2fa8cd94d364';
 
 interface Spread {
   heading: string;
@@ -64,7 +65,9 @@ const galleryItems = [
 
 export default function Index() {
   const [brief, setBrief] = useState('');
+  const [format, setFormat] = useState('20x20');
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [story, setStory] = useState<Story | null>(null);
 
   const generate = async () => {
@@ -92,6 +95,35 @@ export default function Index() {
       toast({ title: 'Ошибка сети', description: 'Проверьте подключение и попробуйте снова.' });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadPdf = async () => {
+    if (!story) return;
+    setPdfLoading(true);
+    try {
+      const res = await fetch(PDF_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ story, format }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        toast({ title: 'Ошибка PDF', description: err.error || 'Попробуйте снова.' });
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `photobook_${format}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: 'PDF скачан!', description: 'Файл готов для отправки в типографию.' });
+    } catch {
+      toast({ title: 'Ошибка сети', description: 'Проверьте подключение и попробуйте снова.' });
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -198,6 +230,26 @@ export default function Index() {
               placeholder="Например: книга о нашем путешествии в Грузию, тёплая и душевная, с акцентом на горы и еду…"
               className="min-h-32 rounded-2xl bg-[#0c0a18]/60 border-white/15 text-white placeholder:text-white/30 resize-none"
             />
+            <div className="mt-4">
+              <p className="text-xs text-white/50 mb-2 font-display uppercase tracking-wider">Формат книги</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { val: '20x20', label: '20×20 см', hint: 'Квадрат' },
+                  { val: '30x20', label: '30×20 см', hint: 'Альбом' },
+                  { val: '21x29', label: '21×29 см', hint: 'A4' },
+                  { val: '30x30', label: '30×30 см', hint: 'Большой' },
+                ].map((f) => (
+                  <button
+                    key={f.val}
+                    onClick={() => setFormat(f.val)}
+                    className={`rounded-xl border px-3 py-2 text-left transition-colors text-sm ${format === f.val ? 'border-lemon bg-lemon/10 text-lemon' : 'border-white/15 bg-white/5 text-white/60 hover:border-white/30'}`}
+                  >
+                    <span className="font-semibold">{f.label}</span>
+                    <span className="block text-xs opacity-70">{f.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <Button
               onClick={generate}
               disabled={loading}
@@ -262,8 +314,17 @@ export default function Index() {
             ))}
           </div>
           <div className="mt-10 flex flex-wrap justify-center gap-4">
-            <Button size="lg" className="rounded-full bg-coral hover:bg-coral/90 text-white font-semibold px-8">
-              <Icon name="FileDown" size={18} className="mr-2" /> Собрать PDF-макет
+            <Button
+              size="lg"
+              onClick={downloadPdf}
+              disabled={pdfLoading}
+              className="rounded-full bg-coral hover:bg-coral/90 text-white font-semibold px-8 disabled:opacity-60"
+            >
+              {pdfLoading ? (
+                <><Icon name="Loader2" size={18} className="mr-2 animate-spin" /> Формируем PDF…</>
+              ) : (
+                <><Icon name="FileDown" size={18} className="mr-2" /> Скачать PDF-макет ({format})</>
+              )}
             </Button>
             <Button size="lg" variant="outline" className="rounded-full border-white/20 bg-transparent text-white hover:bg-white/10 px-8" onClick={generate} disabled={loading}>
               <Icon name="RefreshCw" size={16} className="mr-2" /> Перегенерировать
